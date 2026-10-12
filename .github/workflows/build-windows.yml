@@ -1,0 +1,160 @@
+name: Build Windows Desktop
+
+# 与官方 release.yml 的区别：
+# - 不需要打 tag，也不需要 release notes 校验（官方流程要求 releases/vX.Y.Z.*.md 存在）
+# - 只构建 Windows 产物，产出可从 Actions 运行页直接下载的 artifact
+# - 可选地把产物附到指定 Release 上
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '可选：覆盖产物版本号（如 2.11.11 或 v2.11.11），留空则用 packages/desktop/package.json 中的版本'
+        required: false
+        type: string
+      release_tag:
+        description: '可选：把构建产物上传到该 Release（如 v2.11.11）。留空则只产出 artifact'
+        required: false
+        type: string
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - 'packages/**'
+      - '.github/workflows/build-windows.yml'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: 设置 Node.js 环境
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: 解析构建版本号
+        id: version
+        shell: pwsh
+        run: |
+          $inputVersion = "${{ inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($inputVersion)) {
+            $pkg = Get-Content "packages/desktop/package.json" -Raw | ConvertFrom-Json
+            $version = $pkg.version
+            Write-Host "📦 Using version from packages/desktop/package.json: $version"
+          } else {
+            $version = $inputVersion.TrimStart('v')
+            Write-Host "📝 Using manual input version: $version"
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "   Artifact name pattern: PromptOptimizer-$version-win-x64.*"
+
+      - name: 覆盖桌面端 package.json 版本号
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' }}
+        shell: pwsh
+        run: |
+          $pkgPath = "packages/desktop/package.json"
+          $pkgJson = Get-Content $pkgPath -Raw | ConvertFrom-Json
+          $pkgJson.version = "${{ steps.version.outputs.version }}"
+          $pkgJson | ConvertTo-Json -Depth 10 | Set-Content $pkgPath -Encoding UTF8
+          Write-Host "✅ Version set to ${{ steps.version.outputs.version }}"
+
+      - name: 安装依赖
+        run: pnpm install
+
+      - name: 构建 Windows 桌面应用
+        run: pnpm build:desktop:ci
+
+      - name: 校验构建产物
+        shell: bash
+        run: |
+          echo "Checking build artifacts..."
+          ls -la packages/desktop/dist/ || echo "No dist directory found"
+
+          exe_files=$(find packages/desktop/dist -name "*.exe" 2>/dev/null | wc -l)
+          zip_files=$(find packages/desktop/dist -name "*.zip" 2>/dev/null | wc -l)
+          blockmap_files=$(find packages/desktop/dist -name "*.blockmap" 2>/dev/null | wc -l)
+
+          echo "Found $exe_files .exe, $zip_files .zip, $blockmap_files .blockmap"
+
+          if [ "$exe_files" -eq 0 ] || [ "$zip_files" -eq 0 ]; then
+            echo "::error::Windows build is missing required artifacts (.exe / .zip)"
+            find packages/desktop/dist -type f 2>/dev/null || echo "Directory not found or empty"
+            exit 1
+          fi
+
+          echo "✅ Build artifacts verification passed"
+
+      - name: 清理调试文件
+        shell: bash
+        run: find packages/desktop/dist -type f -name "builder-debug.yml" -delete
+
+      - name: 上传 Windows 安装包（artifact）
+        uses: actions/upload-artifact@v4
+        with:
+          name: PromptOptimizer-Windows-${{ steps.version.outputs.version }}
+          path: |
+            packages/desktop/dist/PromptOptimizer-*.exe
+            packages/desktop/dist/PromptOptimizer-*.zip
+            packages/desktop/dist/*.blockmap
+            packages/desktop/dist/latest*.yml
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 上传到指定 Release（可选）
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG not found, creating it"
+            gh release create "$RELEASE_TAG" \
+              --repo "${{ github.repository }}" \
+              --title "$RELEASE_TAG" \
+              --generate-notes
+          fi
+
+          gh release upload "$RELEASE_TAG" \
+            packages/desktop/dist/PromptOptimizer-*.exe \
+            packages/desktop/dist/PromptOptimizer-*.zip \
+            packages/desktop/dist/*.blockmap \
+            packages/desktop/dist/latest*.yml \
+            --repo "${{ github.repository }}" \
+            --clobber
+
+      - name: 构建结果摘要
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Windows 构建结果"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 版本 | \`${{ steps.version.outputs.version }}\` |"
+            echo "| 运行器 | windows-latest |"
+            echo "| 提交 | \`${GITHUB_SHA:0:7}\` |"
+            echo ""
+            echo "产物（安装包 / 便携 zip）已作为 artifact **PromptOptimizer-Windows-${{ steps.version.outputs.version }}** 上传，可在本次运行页面底部下载。"
+          } >> "$GITHUB_STEP_SUMMARY"
