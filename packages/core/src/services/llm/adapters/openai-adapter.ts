@@ -2,6 +2,7 @@ import OpenAI from 'openai'
 import { AbstractTextProviderAdapter } from './abstract-adapter'
 import { APIError } from '../errors'
 import { normalizeCustomRequestHeaders } from '../../../utils/custom-request-headers'
+import { normalizeOpenAIBaseURL } from '../../../utils/api-base-url'
 import type {
   TextProvider,
   TextModel,
@@ -849,11 +850,12 @@ export class OpenAIAdapter extends AbstractTextProviderAdapter {
     const apiKey = config.connectionConfig.apiKey || ''
     const hasApiKey = typeof apiKey === 'string' && apiKey.trim().length > 0
 
-    // 处理baseURL，如果以'/chat/completions'结尾则去掉
-    let processedBaseURL = config.connectionConfig.baseURL || this.getProvider().defaultBaseURL
-    if (processedBaseURL?.endsWith('/chat/completions')) {
-      processedBaseURL = processedBaseURL.slice(0, -'/chat/completions'.length)
-    }
+    // 规范化 baseURL：兼容完整 endpoint（/v1/chat/completions）、标准 base（/v1）、
+    // 裸域名（自动补 /v1）以及 `#` 结尾的按原样使用标记
+    const processedBaseURL = normalizeOpenAIBaseURL(
+      config.connectionConfig.baseURL as string | undefined,
+      this.getProvider().defaultBaseURL
+    )
 
     // 创建OpenAI实例配置
     const defaultTimeout = isStream ? 90000 : 60000

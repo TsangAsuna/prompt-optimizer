@@ -18,7 +18,7 @@ export class OpenAICompatibleAdapter extends OpenAIAdapter {
     return {
       id: 'openai-compatible',
       name: 'OpenAI Compatible (Custom)',
-      description: 'Custom endpoints that implement OpenAI Chat Completions or Responses APIs',
+      description: 'Add any number of custom OpenAI-compatible providers, each with its own API key and URL. Accepts full endpoints (…/v1/chat/completions), version bases (…/v1), and bare domains (/v1 auto-appended); append # to force as-is.',
       requiresApiKey: false,
       defaultBaseURL: 'http://localhost:11434/v1',
       supportsDynamicModels: true,

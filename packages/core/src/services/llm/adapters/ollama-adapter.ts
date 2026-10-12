@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import type { TextModel, TextModelConfig, TextProvider } from '../types'
 import { OpenAIAdapter } from './openai-adapter'
+import { normalizeOpenAIBaseURL } from '../../../utils/api-base-url'
 
 const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434/v1'
 
@@ -55,14 +56,13 @@ export class OllamaAdapter extends OpenAIAdapter {
 
   private normalizeBaseURL(baseURL: string): string {
     const fallback = this.getProvider().defaultBaseURL
-    const raw = baseURL.trim() ? baseURL.trim() : fallback
-    let normalized = raw.replace(/\/$/, '')
+    let normalized = normalizeOpenAIBaseURL(baseURL || undefined, fallback)
 
-    // Users may paste the full endpoint; keep compatibility with OpenAIAdapter behavior.
-    if (normalized.endsWith('/chat/completions')) {
-      normalized = normalized.slice(0, -'/chat/completions'.length).replace(/\/$/, '')
+    // Ollama 的 OpenAI 兼容端点固定挂在 /v1 下；反代等显式路径也要补 /v1。
+    if (normalized && !/\/v1$/i.test(normalized)) {
+      normalized = `${normalized}/v1`
     }
 
-    return /\/v1$/.test(normalized) ? normalized : `${normalized}/v1`
+    return normalized
   }
 }

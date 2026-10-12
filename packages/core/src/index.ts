@@ -195,6 +195,7 @@ export type {
   CustomRequestHeaderValidationError,
   CustomRequestHeaderValidationResult
 } from './utils/custom-request-headers'
+export { normalizeOpenAIBaseURL } from './utils/api-base-url'
 export type { LLMValidationResult, ValidationError, ValidationWarning } from './services/model/validation'
 export { validateCustomModelConfig } from './utils/environment'
 
